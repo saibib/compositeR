@@ -1,0 +1,110 @@
+---
+title: "compositeR"
+author: "Saimun Habib"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{compositeR}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+Composite indices are tools used to understand multidimensional phenomena by taking multiple pieces of information and aggregating them into a single output. Each variable has a certain importance to the output that is prescribed by the researchers and/or policymakers that are constructing the composite. However due to the hetergenous variances as well as the associations between variables, the nominal importances that are assigned are seldom the true variable importance. Instead, these nominal importances operate as variable weights or trade-off coefficients and there is no clear definition of variable importance. This package defines variable importance as the Shapley Effect of a variable in the composite and tunes the variable weights to optimize them and returns weights which result in Shapley Effects closest to the desired set of variable importances that researchers dictate. 
+
+## Composite Index Dataset
+
+This package takes wide datasets where each column represents a varaible of interest and each row is a geographic unit. In the example dataset below, there are four variables with a random covaraince matrix. 
+
+```{r, echo=FALSE, results='asis'}
+p=4 #dimension
+A=matrix(rnorm(p^2),nrow=p,ncol=p)
+Sigma=t(A)%*%A # it means t(A)%*%A
+C=chol(Sigma)
+n=100 #sample size
+Z=matrix(rnorm(p*n),nrow=n,ncol=p)
+X=Z%*%C # X is a gaussian vector with zero mean and covariance Sigma
+
+knitr::kable(head(X, 10))
+```
+
+## Standardization
+
+In order to aggregate all the variables, we need to ensure that it makes sense to combine them. For instance, it does not makes sense to aggregate GDP and population size. Standardization is a step that removes units from variables and puts them on a common scale. There are many different standardization techniques available each with their own benefits and drawbacks. In the example below, a min-max standardization technique is used to bring everything to range [0,1]. The function also allows for other standardization techniques which can be found int he function documention. 
+
+```{r, echo=FALSE, results='asis'}
+library(compositeR)
+X_std = standardize(X, method = 'min_max')
+colnames(X_std) = paste("var", c(1:ncol(X_std)),sep = '')
+```
+
+
+## Aggregation
+
+After standardizing the composite index, the next step is to weight the varaibles and aggregate them. As with standardization, there are different aggregation methods available. In the example below, weights are applied to the variables and they are aggregated arithmetically to produce the composite score, effectively producing a weighted average of the variables. The index is weighted with the `impt` vector. 
+
+```{r, echo=FALSE, results='asis'}
+impt = c(1/4,1/8,1/8,1/2)
+X_agg = agg(X_std,var_wts = impt, agg_method = 'geom')
+```
+
+## Optimization
+
+In order to produce the optimized variable weights to achieve the desired variable importance, parallelized differential evolutionary optimization is implemented. To accomplish this, the `DEoptim` function from the `DEoptim` package is used. It is given a vector of desired importances, `impt` as well as an aggregation procedure under `model`. The function gives a random weight vector to the `model` function and using the objective function `weights_shapley_diff`, it calculates the Euclidean distance between the vector of desired variable importances and the vector of resultant Shapley Effects. Using the result, it tunes the weights to minimize the distance and returns the best weights. 
+
+```{r, echo=FALSE, results='asis'}
+library(parallel)
+library(sensitivity)
+library(DEoptim)
+clus <- makeCluster(detectCores()-1) # set the number of processor cores
+setDefaultCluster(cl=clus)
+clusterExport(cl = clus, varlist = list('X_std', 'agg', 'sobolshap_knn',
+                                      'weights_shapley_diff'), envir = environment())
+
+res = DEoptim::DEoptim(fn = weights_shapley_diff, lower = rep(0,ncol(X_std)),
+                    upper = rep(4, ncol(X_std)), control = list(cluster = clus),
+                    impt = impt, model = agg, data = X_std, method = 'knn',
+                    randperm = T, n.perm=30, n.knn=10, agg_method = 'ar')
+
+setDefaultCluster(cl=NULL); stopCluster(clus)
+
+best_wts = res$optim$bestmem/sum(res$optim$bestmem)
+```
+
+## Visualizing Results
+
+Two helper functions are avaiable to help visualize the results of the optimization. The first function `wts_v_optim_wts` displays the original weights versus the optimum weights while the second function `desired_v_shapley` displays the desired variable importances, the variables' Shapley Effects under the original weighting scheme, and the variables' Shapley Effects under the optimized weights. 
+
+
+
+```{r, echo=FALSE, results='asis'}
+library(ggplot2)
+library(dplyr)
+wts_v_optim_wts(X_std,impt,best_wts)
+
+# the shapley effects under the original weights
+orig_shap = sobolshap_knn(agg, X_std, method = 'knn', return.shap = T, n.knn=10, var_wts = impt)
+# the shapley effects under the optimized weights
+optim_shap = sobolshap_knn(agg, X_std, method = 'knn', return.shap = T, n.knn=10, var_wts = best_wts)
+
+desired_v_shapley(X_std, impt, as.numeric(orig_shap$Shap), as.numeric(optim_shap$Shap))
+
+```
+
+
+## Ranking
+
+When variables in a composite aren't positively correlated, there is an issue of theoretical cohesion in the composite. In scenario's like this, it's recommended to not aggregate the varibles into a single metric and rather treat them as a scoreboard for the countries along different dimensions of interest. There are two ranking procedures that can be used to decide which countries preform the best over all the the variables in this score board. The first is the Borda Count method and the other is the Condorcet method. 
+
+```{r, echo=FALSE, results='asis'}
+
+rankings(X_std, method = 'borda')
+rankings(X_std, method = 'condorcet')
+
+```

@@ -1,0 +1,22 @@
+Package: compositeR
+Title: Optimize Variable Weights in a Composite Index using Shapley Effects
+Version: 0.0.0.9000
+Authors@R: 
+    person(given = "Saimun",
+           family = "Habib",
+           role = c("aut", "cre"),
+           email = "thesaimun@gmail.com")
+Description: This package is used to create variable weights in composite indices to achieve target variable importances by using Shapley Effects as a definition of variable importance. An objective function is defined to minimze the distance between a target vector of importances and a resultant vector of Shapley Effects from a given vector of weights. Other functions are included for common variable aggregation methods and winner selection.
+License: GPL-3
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.1.1
+Imports:
+  ggplot2,
+  votesys,
+  sensitivity,
+  stats,
+  DEoptim
+Suggests: knitr, rmarkdown
+VignetteBuilder: knitr
